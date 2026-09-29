@@ -2144,6 +2144,46 @@ go = function(screen){
   _go(screen);
   applyReveal();
 };
+
+/* ==================================================================
+   BROWSER BACK BUTTON
+   Every screen gets its own entry in the browser history, so pressing
+   Back goes to the previous screen instead of leaving the website.
+   ================================================================== */
+var VALID_SCREENS = ['home','intake','dashboard','judge','mentorView','orgView'];
+
+var _goHistory = go;   // the navigation we already had
+
+/* fromHistory = true means the browser moved us, so we must not add a new entry */
+function goWithHistory(screen, fromHistory){
+  if (VALID_SCREENS.indexOf(screen) === -1) screen = 'home';
+  _goHistory(screen);
+
+  // The screen we asked for is not always the screen we land on - opening the
+  // dashboard with no plan sends you to the intake form instead.
+  var current = document.querySelector('.screen.active');
+  var landed = current ? current.id : screen;
+
+  if (fromHistory) return;
+  if (history.state && history.state.screen === landed) return;
+  try { history.pushState({ screen: landed }, '', '#' + landed); } catch (e) {}
+}
+
+go = function (screen) { goWithHistory(screen, false); };
+
+window.addEventListener('popstate', function (event) {
+  var screen = (event.state && event.state.screen) ||
+               (location.hash ? location.hash.slice(1) : 'home');
+  goWithHistory(screen, true);
+});
+
+/* Give the first screen a history entry, and honour a #screen in the address bar. */
+(function setUpHistory(){
+  var start = location.hash ? location.hash.slice(1) : 'home';
+  if (VALID_SCREENS.indexOf(start) === -1) start = 'home';
+  try { history.replaceState({ screen: 'home' }, '', '#home'); } catch (e) {}
+  if (start !== 'home') goWithHistory(start, false);
+})();
 </script>
 </body>
 </html>

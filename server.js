@@ -253,13 +253,6 @@ const server = http.createServer(function (req, res) {
     return sendJson(res, 200, { live: PROVIDER !== 'none', provider: PROVIDER });
   }
 
-  // Debug helper: shows which models your key can use (never shows the key itself)
-  if (req.url === '/api/models') {
-    if (PROVIDER !== 'gemini') return sendJson(res, 200, { models: MODELS[PROVIDER] || [] });
-    return listGeminiModels()
-      .then(function (m) { return sendJson(res, 200, { models: m, chosen: geminiModelCache }); })
-      .catch(function (e) { return sendJson(res, 200, { error: e.message }); });
-  }
 
   // The chat endpoint (this is where the real AI happens)
   if (req.url === '/api/chat' && req.method === 'POST') {
@@ -287,8 +280,18 @@ const server = http.createServer(function (req, res) {
         console.log('[HackMentor] real AI reply via ' + PROVIDER + ' / ' + result.model);
         return sendJson(res, 200, { ok: true, reply: result.text, provider: PROVIDER, model: result.model });
       } catch (err) {
-        console.log('[HackMentor] AI call failed: ' + err.message);
-        return sendJson(res, 200, { ok: false, error: err.message || 'AI request failed' });
+        var why = err.message || 'AI request failed';
+        console.log('[HackMentor] AI call failed: ' + why);
+        // "Busy" means the free tier is rate limited or the model is overloaded.
+        // We tell the browser how long to wait so it can retry instead of giving up.
+        var busy = /quota|rate limit|429|high demand|overload|try again later/i.test(why);
+        var stated = why.match(/retry in ([\d.]+)\s*s/i);
+        return sendJson(res, 200, {
+          ok: false,
+          error: why,
+          kind: busy ? 'busy' : 'error',
+          retryAfter: stated ? Math.ceil(parseFloat(stated[1])) : (busy ? 15 : 0)
+        });
       }
     });
     return;

@@ -580,6 +580,18 @@ table.tt tr:hover td{background:rgba(255,255,255,.02)}
 .announce{background:rgba(255,180,84,.09);border:1px solid rgba(255,180,84,.35);border-radius:12px;
   padding:14px 18px;margin-bottom:18px;font-size:14px;color:#FFD9A0}
 .announce .fh{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--amber);margin-bottom:6px}
+/* ===== FIXES: disabled state, long text, narrow tables ===== */
+button[disabled],input[disabled],textarea[disabled]{
+  opacity:.45;cursor:not-allowed;transform:none !important;box-shadow:none !important;
+}
+.teamhead h2,.sec h3,.idea h4,.mini .v,.msg,.fmsg p,.qbox .q{overflow-wrap:anywhere}
+.sec p,.sec li,.pitchbox,.tl span,.mini .s,.idea p,.gcard,.trow,table.vt td,table.tt td{overflow-wrap:anywhere}
+.split,.split > *,.sections,.sections > *{min-width:0}
+.teamhead > div:first-child{min-width:0;max-width:100%}
+@media (max-width:760px){
+  table.tt,table.vt{display:block;overflow-x:auto;white-space:nowrap}
+  table.tt td,table.vt td{white-space:normal;min-width:110px}
+}
 </style>
 </head>
 <body>
@@ -785,8 +797,8 @@ table.tt tr:hover td{background:rgba(255,255,255,.02)}
     <div class="eyebrow" style="color:var(--violet)">JUDGE ASKS</div>
     <div class="q" id="judgeQ">Press “Next Question” to begin.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:20px">
-      <button class="btn small" onclick="nextJudgeQuestion()">Next Question →</button>
-      <button class="btn ghost small" onclick="showSuggested()">💡 Show Suggested Answer</button>
+      <button class="btn small" id="btnNextQ" onclick="nextJudgeQuestion()">Next Question →</button>
+      <button class="btn ghost small" id="btnSuggest" onclick="showSuggested()">💡 Show Suggested Answer</button>
     </div>
     <div class="answerbox" id="judgeA"></div>
   </div>
@@ -794,7 +806,7 @@ table.tt tr:hover td{background:rgba(255,255,255,.02)}
   <div class="card">
     <div class="eyebrow">PRACTISE YOUR OWN ANSWER</div>
     <textarea id="myAnswer" placeholder="Type the answer you would actually give the judge…"></textarea>
-    <button class="btn small" style="margin-top:12px" onclick="evaluateAnswer()">Score My Answer</button>
+    <button class="btn small" id="btnScore" style="margin-top:12px" onclick="evaluateAnswer()">Score My Answer</button>
     <div class="answerbox" id="scoreBox"></div>
   </div>
 </section>
@@ -1216,7 +1228,7 @@ function generatePlan(){
   state.team = {
     name: $('teamName').value.trim() || 'Your Team',
     problem: problem,
-    size: parseInt($('teamSize').value, 10) || 4,
+    size: Math.max(1, Math.min(20, parseInt($('teamSize').value, 10) || 4)),
     experience: $('experience').value,
     skills: selectedSkills.slice(),
     minutes: mins,
@@ -1433,6 +1445,7 @@ function showTyping(on){
 }
 
 function sendChat(){
+  if (state.busy) return;              // one request at a time
   var input = $('chatInput');
   var text = input.value.trim();
   if (!text) return;
@@ -1440,12 +1453,18 @@ function sendChat(){
   addMsg('me', text);
   state.chat.push({ role:'user', content:text });
   showTyping(true);
+  setBusy(true);
 
-  askAI(state.chat, 'mentor').then(function(res){
+  askAIRetry(state.chat, 'mentor', function (secs) {
+    addNotice('AI is busy — retrying in ' + secs + 's…');
+  }).then(function(res){
     showTyping(false);
+    setBusy(false);
     if (!res.ok) {
       setOffline();
-      addNotice('AI service unavailable — switching to offline mentor mode.');
+      addNotice(res.kind === 'busy'
+        ? 'AI is rate limited right now — switching to offline mentor mode.'
+        : 'AI service unavailable — switching to offline mentor mode.');
       var local = offlineMentor(text);
       addMsg('ai', local);
       state.chat.push({ role:'assistant', content:local });
@@ -1464,6 +1483,35 @@ function askAI(messages, mode){
     body: JSON.stringify({ messages: messages, context: buildContext(), mode: mode })
   }).then(function(r){ return r.json(); })
     .catch(function(){ return { ok:false, error:'network' }; });
+}
+
+/* Disable the buttons while the AI is thinking, so one click = one request. */
+function setBusy(on){
+  state.busy = !!on;
+  ['btnNextQ','btnSuggest','btnScore'].forEach(function(id){
+    var b = document.getElementById(id);
+    if (b) b.disabled = !!on;
+  });
+  var send = document.querySelector('.send');
+  if (send) send.disabled = !!on;
+  var input = $('chatInput');
+  if (input) input.disabled = !!on;
+}
+
+/* Google's free tier allows only a few requests per minute. If we hit that,
+   wait the time Google asks for and try once more instead of giving up. */
+function askAIRetry(messages, mode, onBusy){
+  return askAI(messages, mode).then(function (res) {
+    if (res.ok) return res;
+    if (res.kind === 'busy' && res.retryAfter && res.retryAfter <= 30) {
+      var wait = res.retryAfter + 1;
+      if (onBusy) onBusy(wait);
+      return new Promise(function (done) {
+        setTimeout(function () { done(askAI(messages, mode)); }, wait * 1000);
+      });
+    }
+    return res;
+  });
 }
 
 function setOffline(){
@@ -1568,6 +1616,8 @@ function openJudge(){
 }
 
 function nextJudgeQuestion(){
+  if (state.busy) return;
+  setBusy(true);
   $('judgeA').style.display = 'none';
   $('scoreBox').style.display = 'none';
   $('myAnswer').value = '';
@@ -1576,7 +1626,10 @@ function nextJudgeQuestion(){
   var prompt = 'Ask the next judge question. Do not repeat any of these already-asked questions: ' +
     (state.judgeAsked.join(' | ') || 'none yet');
 
-  askAI([{ role:'user', content: prompt }], 'judge').then(function(res){
+  askAIRetry([{ role:'user', content: prompt }], 'judge', function (secs) {
+    $('judgeQ').textContent = 'AI is busy — retrying in ' + secs + 's…';
+  }).then(function(res){
+    setBusy(false);
     var q;
     if (res.ok && res.reply) { q = res.reply.replace(/^["']|["']$/g,''); }
     else {
@@ -1591,13 +1644,16 @@ function nextJudgeQuestion(){
 }
 
 function showSuggested(){
+  if (state.busy) return;
+  setBusy(true);
   var box = $('judgeA');
   box.style.display = 'block';
   box.textContent = 'Preparing a strong answer…';
   var q = $('judgeQ').textContent;
-  askAI([{ role:'user', content:'A judge just asked us: "' + q +
+  askAIRetry([{ role:'user', content:'A judge just asked us: "' + q +
     '". Give us the strongest possible 3-sentence answer we can actually say out loud, using our real project details.' }],
-    'mentor').then(function(res){
+    'mentor', function (secs) { box.textContent = 'AI is busy — retrying in ' + secs + 's…'; }).then(function(res){
+      setBusy(false);
       if (res.ok && res.reply) { box.textContent = res.reply; return; }
       setOffline();
       var p = state.plan, t = state.team;
@@ -1614,10 +1670,13 @@ function evaluateAnswer(){
   var ans = $('myAnswer').value.trim();
   var box = $('scoreBox');
   if (!ans) { box.style.display='block'; box.textContent = 'Type your answer first, then press Score My Answer.'; return; }
+  if (state.busy) return;
+  setBusy(true);
   box.style.display = 'block';
   box.textContent = 'Judging your answer…';
-  askAI([{ role:'user', content:'Judge question: "' + $('judgeQ').textContent + '"\n\nOur answer: "' + ans + '"' }],
-    'judge-eval').then(function(res){
+  askAIRetry([{ role:'user', content:'Judge question: "' + $('judgeQ').textContent + '"\n\nOur answer: "' + ans + '"' }],
+    'judge-eval', function (secs) { box.textContent = 'AI is busy — retrying in ' + secs + 's…'; }).then(function(res){
+      setBusy(false);
       if (res.ok && res.reply) { box.textContent = res.reply; return; }
       setOffline();
       var words = ans.split(/\s+/).length;
@@ -1689,6 +1748,12 @@ function loadDemo(){
 
 function resetDemo(){
   state.team = null; state.plan = null; state.chat = []; state.judgeAsked = [];
+  state.busy = false;
+  // also clear everything the organiser dashboard collected during the demo
+  ['hm_teams','hm_mentors','hm_logi','hm_ps','hm_feed'].forEach(function (k) {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
+  renderOrg();
   selectedSkills = [];
   var chips = $('skillChips').children;
   for (var i=0;i<chips.length;i++) chips[i].classList.remove('on');
@@ -2001,6 +2066,21 @@ function renderOrg(){
 
   area.innerHTML = h;
 }
+
+/* ---------- accessibility: clickable cards reachable by keyboard ---------- */
+function makeCardsFocusable(){
+  var cards = document.querySelectorAll('.role');
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    if (c.getAttribute('tabindex')) continue;
+    c.setAttribute('tabindex', '0');
+    c.setAttribute('role', 'button');
+    c.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); this.click(); }
+    });
+  }
+}
+makeCardsFocusable();
 
 /* ---------- visual only: readiness gauge in the chat sidebar ---------- */
 function updateGauge(){

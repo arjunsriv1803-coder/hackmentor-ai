@@ -1,0 +1,2 @@
+# The embedded web fonts are third-party data, not our source code.
+src/fonts.css linguist-vendored

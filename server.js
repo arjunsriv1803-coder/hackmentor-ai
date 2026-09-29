@@ -8,9 +8,12 @@
    No libraries needed. Just run:  node server.js
    ============================================================ */
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ---------- 1. Read the secret key from the .env file ---------- */
 function loadEnvFile() {
@@ -297,11 +300,35 @@ const server = http.createServer(function (req, res) {
     return;
   }
 
-  // Anything else: serve the website
-  fs.readFile(path.join(__dirname, 'index.html'), function (err, data) {
-    if (err) { res.writeHead(500); return res.end('index.html not found'); }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(data);
+  // Anything else: serve the built React app out of the dist folder.
+  var TYPES = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.woff2': 'font/woff2',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.ico': 'image/x-icon'
+  };
+  var dist = path.join(__dirname, 'dist');
+  var wanted = decodeURIComponent((req.url || '/').split('?')[0]);
+  var file = path.join(dist, wanted);
+
+  // never serve anything outside dist
+  if (file.indexOf(dist) !== 0) file = path.join(dist, 'index.html');
+
+  fs.stat(file, function (err, stat) {
+    // unknown path or a folder: fall back to index.html (single page app)
+    if (err || stat.isDirectory()) file = path.join(dist, 'index.html');
+    fs.readFile(file, function (err2, data) {
+      if (err2) {
+        res.writeHead(500, { 'content-type': 'text/plain' });
+        return res.end('The app has not been built yet. Run:  npm run build');
+      }
+      res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+      res.end(data);
+    });
   });
 });
 

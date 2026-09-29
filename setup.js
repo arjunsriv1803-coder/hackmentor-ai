@@ -4,9 +4,12 @@
    It asks for your API key and writes the .env file for you.
    ============================================================ */
 
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
+import fs from 'fs';
+import path from 'path';
+import readline from 'readline';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 

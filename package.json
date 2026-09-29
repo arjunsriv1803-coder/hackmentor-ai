@@ -1,10 +1,22 @@
 {
   "name": "hackmentor-ai",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "HackMentor AI - your AI mentor from problem statement to final pitch",
-  "main": "server.js",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && node server.js",
+    "server": "node server.js",
+    "setup": "node setup.js"
   },
-  "license": "MIT"
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
 }

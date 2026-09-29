@@ -1,0 +1,10 @@
+{
+  "name": "hackmentor-ai",
+  "version": "1.0.0",
+  "description": "HackMentor AI - your AI mentor from problem statement to final pitch",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}
